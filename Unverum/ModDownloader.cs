@@ -186,11 +186,14 @@ public class ModDownloader
                         while (reader.MoveToNextEntry())
                         {
                             if (!reader.Entry.IsDirectory)
+                            {
+                                Directory.CreateDirectory(ArchiveDestination);
                                 reader.WriteEntryToDirectory(ArchiveDestination, new ExtractionOptions()
                                 {
                                     ExtractFullPath = true,
                                     Overwrite = true
                                 });
+                            }
                         }
                     }
                     else
@@ -201,6 +204,7 @@ public class ModDownloader
                         {
                             if (!reader.Entry.IsDirectory)
                             {
+                                Directory.CreateDirectory(ArchiveDestination);
                                 reader.WriteEntryToDirectory(ArchiveDestination, new ExtractionOptions()
                                 {
                                     ExtractFullPath = true,
@@ -277,11 +281,14 @@ public class ModDownloader
                         while (reader.MoveToNextEntry())
                         {
                             if (!reader.Entry.IsDirectory)
+                            {
+                                Directory.CreateDirectory(ArchiveDestination);
                                 reader.WriteEntryToDirectory(ArchiveDestination, new ExtractionOptions()
                                 {
                                     ExtractFullPath = true,
                                     Overwrite = true
                                 });
+                            }
                         }
                     }
                     else
@@ -292,6 +299,7 @@ public class ModDownloader
                         {
                             if (!reader.Entry.IsDirectory)
                             {
+                                Directory.CreateDirectory(ArchiveDestination);
                                 reader.WriteEntryToDirectory(ArchiveDestination, new ExtractionOptions()
                                 {
                                     ExtractFullPath = true,

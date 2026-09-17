@@ -104,17 +104,13 @@ namespace Unverum
                     Global.games.Add(game);
             }
 
-            if (Global.config.Configs == null)
-            {
-                Global.config.CurrentGame = GetGameName(GameBox.SelectedValue)
-                    ?? throw new InvalidOperationException("The selected game is invalid.");
-                Global.config.Configs = new()
-                {
-                    { Global.config.CurrentGame, new() }
-                };
-            }
-            else
-                GameBox.SelectedIndex = Global.games.IndexOf(Global.config.CurrentGame);
+            Global.config.Configs ??= new();
+            Global.config.CurrentGame = Global.games.FirstOrDefault(game =>
+                game.Equals(Global.config.CurrentGame, StringComparison.OrdinalIgnoreCase))
+                ?? GetGameName(GameBox.SelectedValue)
+                ?? throw new InvalidOperationException("The selected game is invalid.");
+            Global.config.Configs.TryAdd(Global.config.CurrentGame, new());
+            GameBox.SelectedIndex = Global.games.IndexOf(Global.config.CurrentGame);
 
             if (GameBox.SelectedIndex == 7)
                 DiscordButton.Visibility = Visibility.Collapsed;

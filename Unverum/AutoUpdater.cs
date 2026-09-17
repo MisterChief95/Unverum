@@ -13,7 +13,6 @@ using System.Diagnostics;
 using System.Reflection;
 using System.IO;
 using Unverum.UI;
-using System.Windows.Media.Imaging;
 
 namespace Unverum;
 
