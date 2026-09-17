@@ -1,18 +1,9 @@
-﻿namespace Unverum
-{
-    public class DownloadProgress
-    {
-        public DownloadProgress(float percentage, long downloadedBytes, long totalBytes, string fileName)
-        {
-            DownloadedBytes = downloadedBytes;
-            TotalBytes = totalBytes;
-            Percentage = percentage;
-            FileName = fileName;
-        }
+namespace Unverum;
 
-        public float Percentage { get; set; }
-        public long DownloadedBytes { get; set; }
-        public long TotalBytes { get; set; }
-        public string FileName { get; set; }
-    }
+public class DownloadProgress(float percentage, long downloadedBytes, long totalBytes, string fileName)
+{
+    public float Percentage { get; set; } = percentage;
+    public long DownloadedBytes { get; set; } = downloadedBytes;
+    public long TotalBytes { get; set; } = totalBytes;
+    public string FileName { get; set; } = fileName;
 }
