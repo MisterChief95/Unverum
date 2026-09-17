@@ -16,7 +16,7 @@ namespace Unverum;
 public static class ModLoader
 {
     // Restore all backups created from previous build
-    public static bool Restart(string path, string movies, string splash, string sound)
+    public static bool Restart(string path, string? movies, string? splash, string? sound)
     {
         try
         {
@@ -250,7 +250,7 @@ public static class ModLoader
         );
     }
     // Copy over mod files in order of ModList
-    public static void Build(string path, List<Mod> mods, bool? patched, string movies, string splash, string sound)
+    public static void Build(string path, List<Mod> mods, bool? patched, string? movies, string? splash, string? sound)
     {
         var missing = false;
         Dictionary<string, Entry>? entries = null;

@@ -19,7 +19,7 @@ public partial class EditWindow : Window
     public bool _folder;
     public string? directory;
     public string? loadout;
-    public EditWindow(string name, bool folder)
+    public EditWindow(string? name, bool folder)
     {
         InitializeComponent();
         _folder = folder;
