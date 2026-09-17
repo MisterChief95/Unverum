@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -14,29 +14,28 @@ using System.Windows.Shapes;
 using System.Threading;
 using System.ComponentModel;
 
-namespace Unverum
+namespace Unverum;
+
+/// <summary>
+/// Interaction logic for ProgressBox.xaml
+/// </summary>
+public partial class ProgressBox : Window
 {
-    /// <summary>
-    /// Interaction logic for ProgressBox.xaml
-    /// </summary>
-    public partial class ProgressBox : Window
+    private readonly CancellationTokenSource cancellationTokenSource;
+    public bool finished = false;
+    public ProgressBox(CancellationTokenSource cancellationTokenSource)
     {
-        private CancellationTokenSource cancellationTokenSource;
-        public bool finished = false;
-        public ProgressBox(CancellationTokenSource cancellationTokenSource)
-        {
-            InitializeComponent();
-            this.cancellationTokenSource = cancellationTokenSource;
-        }
+        InitializeComponent();
+        this.cancellationTokenSource = cancellationTokenSource;
+    }
 
-        private void ProgressBar_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
-        {
+    private void ProgressBar_ValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
 
-        }
+    }
 
-        private void Window_Closing(object sender, CancelEventArgs e)
-        {
-            cancellationTokenSource.Cancel();
-        }
+    private void Window_Closing(object sender, CancelEventArgs e)
+    {
+        cancellationTokenSource.Cancel();
     }
 }

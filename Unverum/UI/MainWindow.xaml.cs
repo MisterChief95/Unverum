@@ -29,14 +29,21 @@ namespace Unverum
     /// </summary>
     public partial class MainWindow : Window
     {
-        public string version;
+        public string version = string.Empty;
         // Separated from Global.config so that order is updated when datagrid is modified
-        public List<string> exes;
+        public List<string>? exes;
         private FileSystemWatcher ModsWatcher;
         private FlowDocument defaultFlow = new FlowDocument();
         private string defaultText = "Unverum Mod Manager is here to help out with all your UE4 Mods!\n\n" +
             "(Right Click Row > Fetch Metadata and confirm the GameBanana URL of the mod to fetch metadata to show here.)";
         private ObservableCollection<String> LauncherOptions = new ObservableCollection<String>(new string[] { "Executable", "Steam" });
+        private static string? GetGameName(object? item)
+        {
+            if (item is not ComboBoxItem { Content: StackPanel panel } || panel.Children.Count < 2 || panel.Children[1] is not TextBlock label)
+                return null;
+            return label.Text.Trim().Replace(":", String.Empty);
+        }
+
         public MainWindow()
         {
             InitializeComponent();
@@ -44,8 +51,8 @@ namespace Unverum
             Global.config = new();
 
             // Get Version Number
-            var UnverumVersion = FileVersionInfo.GetVersionInfo(Assembly.GetExecutingAssembly().Location).FileVersion;
-            version = UnverumVersion.Substring(0, UnverumVersion.LastIndexOf('.'));
+            var unverumVersion = FileVersionInfo.GetVersionInfo(Assembly.GetExecutingAssembly().Location).FileVersion ?? "0.0.0.0";
+            version = unverumVersion[..unverumVersion.LastIndexOf('.')];
 
             Global.logger.WriteLine($"Launched Unverum Mod Manager v{version}!", LoggerType.Info);
             // Get Global.config if it exists
@@ -54,13 +61,16 @@ namespace Unverum
                 try
                 {
                     var configString = File.ReadAllText($@"{Global.assemblyLocation}{Global.s}Config.json");
-                    Global.config = JsonSerializer.Deserialize<Config>(configString);
-                    foreach (var game in Global.config.Configs.Keys)
+                    Global.config = JsonSerializer.Deserialize<Config>(configString) ?? new();
+                    Global.config.Configs ??= new();
+                    foreach (var gameConfig in Global.config.Configs.Values)
                     {
-                        if (Global.config.Configs[game].FirstOpen && !Global.config.Configs[game].LauncherOptionConverted)
+                        gameConfig.Loadouts ??= new();
+                        gameConfig.CurrentLoadout = string.IsNullOrEmpty(gameConfig.CurrentLoadout) ? "Default" : gameConfig.CurrentLoadout;
+                        if (gameConfig.FirstOpen && !gameConfig.LauncherOptionConverted)
                         {
-                            Global.config.Configs[game].LauncherOptionIndex = Convert.ToInt32(Global.config.Configs[game].LauncherOption);
-                            Global.config.Configs[game].LauncherOptionConverted = true;
+                            gameConfig.LauncherOptionIndex = Convert.ToInt32(gameConfig.LauncherOption);
+                            gameConfig.LauncherOptionConverted = true;
                             Global.UpdateConfig();
                         }
                     }
@@ -90,47 +100,32 @@ namespace Unverum
             Global.games = new List<string>();
             foreach (var item in GameBox.Items)
             {
-                var game = (((item as ComboBoxItem).Content as StackPanel).Children[1] as TextBlock).Text.Trim().Replace(":", String.Empty);
-                Global.games.Add(game);
+                if (GetGameName(item) is { } game)
+                    Global.games.Add(game);
             }
 
-            if (Global.config.Configs == null)
-            {
-                Global.config.CurrentGame = (((GameBox.SelectedValue as ComboBoxItem).Content as StackPanel).Children[1] as TextBlock).Text.Trim().Replace(":", String.Empty);
-                Global.config.Configs = new()
-                {
-                    { Global.config.CurrentGame, new() }
-                };
-            }
-            else
-                GameBox.SelectedIndex = Global.games.IndexOf(Global.config.CurrentGame);
+            Global.config.Configs ??= new();
+            Global.config.CurrentGame = Global.games.FirstOrDefault(game =>
+                game.Equals(Global.config.CurrentGame, StringComparison.OrdinalIgnoreCase))
+                ?? GetGameName(GameBox.SelectedValue)
+                ?? throw new InvalidOperationException("The selected game is invalid.");
+            Global.config.Configs.TryAdd(Global.config.CurrentGame, new());
+            GameBox.SelectedIndex = Global.games.IndexOf(Global.config.CurrentGame);
 
             if (GameBox.SelectedIndex == 7)
                 DiscordButton.Visibility = Visibility.Collapsed;
 
-            if (String.IsNullOrEmpty(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout))
-                Global.config.Configs[Global.config.CurrentGame].CurrentLoadout = "Default";
-            if (Global.config.Configs[Global.config.CurrentGame].Loadouts == null)
-                Global.config.Configs[Global.config.CurrentGame].Loadouts = new();
-            if (!Global.config.Configs[Global.config.CurrentGame].Loadouts.ContainsKey(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout))
-                if (Global.config.Configs[Global.config.CurrentGame].ModList != null && Global.config.Configs[Global.config.CurrentGame].CurrentLoadout == "Default")
-                {
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts.Add(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout, Global.config.Configs[Global.config.CurrentGame].ModList);
-                    Global.config.Configs[Global.config.CurrentGame].ModList = null;
-                }
-                else
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts.Add(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout, new());
-            else if (Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] == null)
-                if (Global.config.Configs[Global.config.CurrentGame].ModList != null && Global.config.Configs[Global.config.CurrentGame].CurrentLoadout == "Default")
-                {
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] = Global.config.Configs[Global.config.CurrentGame].ModList;
-                    Global.config.Configs[Global.config.CurrentGame].ModList = null;
-                }
-                else
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] = new();
-            Global.ModList = Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout];
-
-            Global.LoadoutItems = new ObservableCollection<String>(Global.config.Configs[Global.config.CurrentGame].Loadouts.Keys);
+            var selectedConfig = Global.CurrentGameConfig;
+            selectedConfig.Loadouts ??= new();
+            selectedConfig.CurrentLoadout = string.IsNullOrEmpty(selectedConfig.CurrentLoadout) ? "Default" : selectedConfig.CurrentLoadout;
+            if (!selectedConfig.Loadouts.TryGetValue(selectedConfig.CurrentLoadout, out var selectedMods) || selectedMods == null)
+            {
+                selectedMods = selectedConfig.ModList ?? new ObservableCollection<Mod>();
+                selectedConfig.Loadouts[selectedConfig.CurrentLoadout] = selectedMods;
+                selectedConfig.ModList = null;
+            }
+            Global.ModList = selectedMods;
+            Global.LoadoutItems = new ObservableCollection<String>(selectedConfig.Loadouts.Keys);
 
             LoadoutsBox.ItemsSource = Global.LoadoutItems;
             LoadoutsBox.SelectedItem = Global.config.Configs[Global.config.CurrentGame].CurrentLoadout;
@@ -335,12 +330,13 @@ namespace Unverum
         {
             var checkBox = e.OriginalSource as CheckBox;
 
-            Mod mod = checkBox?.DataContext as Mod;
+            if (checkBox?.DataContext is not Mod mod)
+                return;
 
             if (mod != null)
             {
                 mod.enabled = true;
-                List<Mod> temp = Global.config.Configs[Global.config.CurrentGame].ModList.ToList();
+                List<Mod> temp = Global.CurrentGameConfig.ModList?.ToList() ?? [];
                 foreach (var m in temp)
                 {
                     if (m.name == mod.name)
@@ -354,12 +350,13 @@ namespace Unverum
         {
             var checkBox = e.OriginalSource as CheckBox;
 
-            Mod mod = checkBox?.DataContext as Mod;
+            if (checkBox?.DataContext is not Mod mod)
+                return;
 
             if (mod != null)
             {
                 mod.enabled = false;
-                List<Mod> temp = Global.config.Configs[Global.config.CurrentGame].ModList.ToList();
+                List<Mod> temp = Global.CurrentGameConfig.ModList?.ToList() ?? [];
                 foreach (var m in temp)
                 {
                     if (m.name == mod.name)
@@ -478,7 +475,7 @@ namespace Unverum
         private async void Launch_Click(object sender, RoutedEventArgs e)
         {
             // Build Mod Loadout
-            if (Global.config.Configs[Global.config.CurrentGame].ModsFolder != null)
+            if (Global.CurrentGameConfig.ModsFolder is { } modsFolder)
             {
                 GameBox.IsEnabled = false;
                 ModGrid.IsEnabled = false;
@@ -493,7 +490,7 @@ namespace Unverum
                 Refresh();
                 // Check if mods from before Unverum install existed
                 Regex regex = new Regex(@"(^~*[a-z]$|^--Base--$)");
-                var manuallyInstalledMods = Directory.GetDirectories(Global.config.Configs[Global.config.CurrentGame].ModsFolder)
+                var manuallyInstalledMods = Directory.GetDirectories(modsFolder)
                 .Where(folder => !regex.IsMatch(Path.GetFileName(folder)));
                 if (manuallyInstalledMods.Count() > 0)
                 {
@@ -506,9 +503,9 @@ namespace Unverum
                                 Path.Combine(Global.assemblyLocation, "Mods", Global.config.CurrentGame, Path.GetFileName(manuallyInstalledMod)));
                     }
                 }
-                Directory.CreateDirectory(Global.config.Configs[Global.config.CurrentGame].ModsFolder);
+                Directory.CreateDirectory(modsFolder);
                 Global.logger.WriteLine($"Building loadout for {Global.config.CurrentGame}", LoggerType.Info);
-                if (!await Build(Global.config.Configs[Global.config.CurrentGame].ModsFolder))
+                if (!await Build(modsFolder))
                 {
                     Global.logger.WriteLine($"Failed to build loadout, not building and launching", LoggerType.Error);
                     ModGrid.IsEnabled = true;
@@ -557,12 +554,14 @@ namespace Unverum
                     try
                     {
                         Global.logger.WriteLine($"Launching {Global.config.Configs[Global.config.CurrentGame].GamePath} with {Global.config.Configs[Global.config.CurrentGame].Launcher}", LoggerType.Info);
-                        var ps = new ProcessStartInfo(Global.config.Configs[Global.config.CurrentGame].Launcher)
+                        var launcher = Global.CurrentGameConfig.Launcher!;
+                        var gamePath = Global.CurrentGameConfig.GamePath!;
+                        var ps = new ProcessStartInfo(launcher)
                         {
-                            WorkingDirectory = Path.GetDirectoryName(Global.config.Configs[Global.config.CurrentGame].Launcher),
+                            WorkingDirectory = Path.GetDirectoryName(launcher),
                             UseShellExecute = true,
                             Verb = "open",
-                            Arguments = $"\"{Global.config.Configs[Global.config.CurrentGame].GamePath}\""
+                            Arguments = $"\"{gamePath}\""
                         };
                         Process.Start(ps);
                     }
@@ -575,7 +574,7 @@ namespace Unverum
             }
             else if (Global.config.Configs[Global.config.CurrentGame].Launcher != null && File.Exists(Global.config.Configs[Global.config.CurrentGame].Launcher))
             {
-                var path = Global.config.Configs[Global.config.CurrentGame].Launcher;
+                var path = Global.CurrentGameConfig.Launcher!;
                 try
                 {
                     Global.config.Configs[Global.config.CurrentGame].LauncherOptionIndex = LauncherOptionsBox.SelectedIndex;
@@ -645,7 +644,7 @@ namespace Unverum
                     Global.logger.WriteLine($"Launching {path}", LoggerType.Info);
                     var ps = new ProcessStartInfo(path)
                     {
-                        WorkingDirectory = Path.GetDirectoryName(Global.config.Configs[Global.config.CurrentGame].Launcher),
+                    WorkingDirectory = Path.GetDirectoryName(path),
                         UseShellExecute = true,
                         Verb = "open"
                     };
@@ -760,16 +759,15 @@ namespace Unverum
 
         private void ModGrid_ContextMenuOpening(object sender, ContextMenuEventArgs e)
         {
-            FrameworkElement element = sender as FrameworkElement;
-            if (element == null)
+            if (sender is not FrameworkElement { ContextMenu: { } contextMenu } element)
             {
                 return;
             }
 
             if (ModGrid.SelectedItem == null)
-                element.ContextMenu.Visibility = Visibility.Collapsed;
+                contextMenu.Visibility = Visibility.Collapsed;
             else
-                element.ContextMenu.Visibility = Visibility.Visible;
+                contextMenu.Visibility = Visibility.Visible;
         }
 
         private async void DeleteItem_Click(object sender, RoutedEventArgs e)
@@ -802,10 +800,13 @@ namespace Unverum
             return await Task.Run(() =>
             {
                 // Get other folders using the mods folder
-                string SplashFolder = null;
-                string MoviesFolder = null;
-                string SoundsFolder = null;
-                var ContentFolder = new DirectoryInfo(Global.config.Configs[Global.config.CurrentGame].ModsFolder).Parent.Parent.FullName;
+                string? SplashFolder = null;
+                string? MoviesFolder = null;
+                string? SoundsFolder = null;
+                var modsFolder = Global.CurrentGameConfig.ModsFolder
+                    ?? throw new InvalidOperationException("The game mod folder is not configured.");
+                var ContentFolder = new DirectoryInfo(modsFolder).Parent?.Parent?.FullName
+                    ?? throw new InvalidOperationException("The configured mods folder has no content directory.");
                 if (Directory.Exists($"{ContentFolder}{Global.s}Splash"))
                     SplashFolder = $"{ContentFolder}{Global.s}Splash";
                 if (Directory.Exists($"{ContentFolder}{Global.s}Movies"))
@@ -823,10 +824,11 @@ namespace Unverum
                 if (Global.config.CurrentGame == "Dragon Ball FighterZ"
                     || Global.config.CurrentGame == "Scarlet Nexus"
                     || Global.config.CurrentGame == "Dragon Ball Sparking! ZERO")
-                    Patched = Setup.CheckPatch(Global.config.Configs[Global.config.CurrentGame].Launcher);
+                    Patched = Setup.CheckPatch(Global.CurrentGameConfig.Launcher
+                        ?? throw new InvalidOperationException("The game executable is not configured."));
                 if (!ModLoader.Restart(path, MoviesFolder, SplashFolder, SoundsFolder))
                     return false;
-                var mods = Global.config.Configs[Global.config.CurrentGame].ModList.Where(x => x.enabled).ToList();
+                var mods = (Global.CurrentGameConfig.ModList ?? []).Where(x => x.enabled).ToList();
                 mods.Reverse();
 
                 // Rename HeroGame back since its no longer needed to be renamed
@@ -836,7 +838,7 @@ namespace Unverum
                     index = GameBox.SelectedIndex;
                 });
                 if ((GameFilter)index == GameFilter.MHOJ2)
-                    foreach (var file in Directory.GetFiles(Path.GetDirectoryName(Global.config.Configs[Global.config.CurrentGame].ModsFolder), "*", SearchOption.TopDirectoryOnly))
+                    foreach (var file in Directory.GetFiles(Path.GetDirectoryName(modsFolder) ?? modsFolder, "*", SearchOption.TopDirectoryOnly))
                         if (Path.GetExtension(file).Equals(".pak", StringComparison.InvariantCultureIgnoreCase)
                             || Path.GetExtension(file).Equals(".sig", StringComparison.InvariantCultureIgnoreCase))
                             File.Move(file, file.Replace("HeroGame.", "HeroGame-WindowsNoEditor_0_P.", StringComparison.InvariantCultureIgnoreCase), true);
@@ -914,7 +916,6 @@ namespace Unverum
             var selectedMods = ModGrid.SelectedItems;
             var temp = new Mod[selectedMods.Count];
             selectedMods.CopyTo(temp, 0);
-            bool edited = false;
             foreach (var row in temp)
                 if (row != null)
                 {
@@ -958,7 +959,7 @@ namespace Unverum
             e.Handled = true;
             if (e.Data.GetDataPresent(DataFormats.FileDrop))
             {
-                string[] fileList = (string[])e.Data.GetData(DataFormats.FileDrop, false);
+            if (e.Data.GetData(DataFormats.FileDrop, false) is string[] fileList)
                 CreateMod(fileList);
             }
             DropBox.Visibility = Visibility.Collapsed;
@@ -967,13 +968,13 @@ namespace Unverum
         {
             var nameWindow = new EditWindow(null, true);
             nameWindow.ShowDialog();
-            if (nameWindow.directory != null)
+            if (nameWindow.directory is { } directory)
             {
-                Directory.CreateDirectory(nameWindow.directory);
-                string defaultSig = null;
-                if (Directory.Exists(Global.config.Configs[Global.config.CurrentGame].ModsFolder))
+                Directory.CreateDirectory(directory);
+                string? defaultSig = null;
+                if (Global.CurrentGameConfig.ModsFolder is { } modsFolder && Directory.Exists(modsFolder))
                 {
-                    var sigs = Directory.GetFiles(Path.GetDirectoryName(Global.config.Configs[Global.config.CurrentGame].ModsFolder), "*.sig", SearchOption.TopDirectoryOnly);
+                    var sigs = Directory.GetFiles(Path.GetDirectoryName(modsFolder) ?? modsFolder, "*.sig", SearchOption.TopDirectoryOnly);
                     if (sigs.Length > 0)
                         defaultSig = sigs[0];
                 }
@@ -986,8 +987,8 @@ namespace Unverum
                     {
                         foreach (string path in Directory.GetFiles(file, "*.*", SearchOption.AllDirectories))
                         {
-                            var newPath = path.Replace(file, $"{nameWindow.directory}{Global.s}{Path.GetFileName(file)}");
-                            Directory.CreateDirectory(Path.GetDirectoryName(newPath));
+                            var newPath = path.Replace(file, $"{directory}{Global.s}{Path.GetFileName(file)}");
+                            Directory.CreateDirectory(Path.GetDirectoryName(newPath) ?? directory);
                             File.Copy(path, newPath, true);
                             if (Path.GetExtension(path).Equals(".pak", StringComparison.InvariantCultureIgnoreCase) && defaultSig != null)
                             {
@@ -1004,7 +1005,7 @@ namespace Unverum
                     }
                     else
                     {
-                        var newPath = $"{nameWindow.directory}{Global.s}{Path.GetFileName(file)}";
+                        var newPath = $"{directory}{Global.s}{Path.GetFileName(file)}";
                         File.Copy(file, newPath, true);
                         if (Path.GetExtension(file).Equals(".pak", StringComparison.InvariantCultureIgnoreCase) && defaultSig != null)
                         {
@@ -1042,7 +1043,7 @@ namespace Unverum
             {
                 var nameWindow = new EditWindow(null, true);
                 nameWindow.ShowDialog();
-                if (nameWindow.directory != null)
+                    if (nameWindow.directory is { } directory)
                 {
                     OpenFileDialog dialog = new OpenFileDialog();
                     dialog.DefaultExt = ".pak";
@@ -1052,12 +1053,12 @@ namespace Unverum
                     dialog.ShowDialog();
                     if (!String.IsNullOrEmpty(dialog.FileName))
                     {
-                        Directory.CreateDirectory(nameWindow.directory);
-                        File.Copy(dialog.FileName, $"{nameWindow.directory}{Global.s}{Path.GetFileName(dialog.FileName)}", true);
-                        if (Directory.Exists(Global.config.Configs[Global.config.CurrentGame].ModsFolder))
+                        Directory.CreateDirectory(directory);
+                        File.Copy(dialog.FileName, $"{directory}{Global.s}{Path.GetFileName(dialog.FileName)}", true);
+                        if (Global.CurrentGameConfig.ModsFolder is { } modsFolder && Directory.Exists(modsFolder))
                         {
                             // Copy over sig if it exists
-                            var sigs = Directory.GetFiles(Path.GetDirectoryName(Global.config.Configs[Global.config.CurrentGame].ModsFolder), "*.sig", SearchOption.TopDirectoryOnly);
+                            var sigs = Directory.GetFiles(Path.GetDirectoryName(modsFolder) ?? modsFolder, "*.sig", SearchOption.TopDirectoryOnly);
                             if (sigs.Length > 0)
                                 File.Copy(sigs[0], Path.ChangeExtension($"{nameWindow.directory}{Global.s}{Path.GetFileName(dialog.FileName)}", ".sig"), true);
                         }
@@ -1140,7 +1141,7 @@ namespace Unverum
             return paragraph;
         }
 
-        private void ShowMetadata(string mod)
+        private void ShowMetadata(string? mod)
         {
             if (mod == null || !File.Exists($"{Global.assemblyLocation}{Global.s}Mods{Global.s}{Global.config.CurrentGame}{Global.s}{mod}{Global.s}mod.json"))
             {
@@ -1153,7 +1154,7 @@ namespace Unverum
             {
                 FlowDocument descFlow = new FlowDocument();
                 var metadataString = File.ReadAllText($"{Global.assemblyLocation}{Global.s}Mods{Global.s}{Global.config.CurrentGame}{Global.s}{mod}{Global.s}mod.json");
-                Metadata metadata = JsonSerializer.Deserialize<Metadata>(metadataString);
+                Metadata metadata = JsonSerializer.Deserialize<Metadata>(metadataString) ?? new();
 
                 var para = new Paragraph();
                 if (metadata.submitter != null)
@@ -1230,22 +1231,22 @@ namespace Unverum
 
         private void Download_Click(object sender, RoutedEventArgs e)
         {
-            Button button = sender as Button;
-            var item = button.DataContext as GameBananaRecord;
+            if (sender is not Button { DataContext: GameBananaRecord item } ||
+                GameFilterBox.SelectedIndex < 0 || GameFilterBox.SelectedIndex >= Global.games.Count)
+                return;
             new ModDownloader().BrowserDownload(Global.games[GameFilterBox.SelectedIndex], item);
         }
         private void AltDownload_Click(object sender, RoutedEventArgs e)
         {
-            Button button = sender as Button;
-            var item = button.DataContext as GameBananaRecord;
-            new AltLinkWindow(item.AlternateFileSources, item.Title,
-                (((GameFilterBox.SelectedValue as ComboBoxItem).Content as StackPanel).Children[1] as TextBlock).Text.Trim().Replace(":", String.Empty),
-                item.Link.AbsoluteUri).ShowDialog();
+            if (sender is not Button { DataContext: GameBananaRecord { AlternateFileSources: { } files, Link: { } link } item } ||
+                GetGameName(GameFilterBox.SelectedValue) is not { } game)
+                return;
+            new AltLinkWindow(files, item.Title, game, link.AbsoluteUri).ShowDialog();
         }
         private void Homepage_Click(object sender, RoutedEventArgs e)
         {
-            Button button = sender as Button;
-            var item = button.DataContext as GameBananaRecord;
+            if (sender is not Button { DataContext: GameBananaRecord item })
+                return;
             try
             {
                 var ps = new ProcessStartInfo(item.Link.ToString())
@@ -1296,9 +1297,9 @@ namespace Unverum
         }
         private void MoreInfo_Click(object sender, RoutedEventArgs e)
         {
-            HomepageButton.Content = $"{(TypeBox.SelectedValue as ComboBoxItem).Content.ToString().Trim().TrimEnd('s')} Page";
-            Button button = sender as Button;
-            var item = button.DataContext as GameBananaRecord;
+            if (sender is not Button { DataContext: GameBananaRecord item })
+                return;
+            HomepageButton.Content = $"{(TypeBox.SelectedValue as ComboBoxItem)?.Content?.ToString()?.Trim().TrimEnd('s') ?? "Mod"} Page";
             if (item.Compatible)
                 DownloadButton.Visibility = Visibility.Visible;
             else
@@ -1307,8 +1308,8 @@ namespace Unverum
                 AltButton.Visibility = Visibility.Visible;
             else
                 AltButton.Visibility = Visibility.Collapsed;
-            DescPanel.DataContext = button.DataContext;
-            MediaPanel.DataContext = button.DataContext;
+            DescPanel.DataContext = item;
+            MediaPanel.DataContext = item;
             DescText.ScrollToHome();
             var text = "";
             text += item.ConvertedText;
@@ -1370,8 +1371,8 @@ namespace Unverum
 
         private void ImageLeft_Click(object sender, RoutedEventArgs e)
         {
-            Button button = sender as Button;
-            var item = button.DataContext as GameBananaRecord;
+            if (sender is not Button { DataContext: GameBananaRecord item } || imageCount == 0)
+                return;
             if (--imageCounter == -1)
                 imageCounter = imageCount - 1;
             var image = new BitmapImage(new Uri($"{item.Media[imageCounter].Base}/{item.Media[imageCounter].File}"));
@@ -1393,8 +1394,8 @@ namespace Unverum
 
         private void ImageRight_Click(object sender, RoutedEventArgs e)
         {
-            Button button = sender as Button;
-            var item = button.DataContext as GameBananaRecord;
+            if (sender is not Button { DataContext: GameBananaRecord item } || imageCount == 0)
+                return;
             if (++imageCounter == imageCount)
                 imageCounter = 0;
             var image = new BitmapImage(new Uri($"{item.Media[imageCounter].Base}/{item.Media[imageCounter].File}"));
@@ -1494,7 +1495,8 @@ namespace Unverum
                         List<GameBananaCategory> response = new();
                         try
                         {
-                            response = JsonSerializer.Deserialize<List<GameBananaCategory>>(responseString);
+                            response = JsonSerializer.Deserialize<List<GameBananaCategory>>(responseString)
+                                ?? throw new InvalidDataException("GameBanana returned an empty category list.");
                         }
                         catch (Exception)
                         {
@@ -1551,9 +1553,10 @@ namespace Unverum
                                 }
                                 try
                                 {
-                                    response = JsonSerializer.Deserialize<List<GameBananaCategory>>(responseString);
+                                    response = JsonSerializer.Deserialize<List<GameBananaCategory>>(responseString)
+                                        ?? throw new InvalidDataException("GameBanana returned an empty category list.");
                                 }
-                                catch (Exception ex)
+                                catch (Exception)
                                 {
                                     LoadingBar.Visibility = Visibility.Collapsed;
                                     ErrorPanel.Visibility = Visibility.Visible;
@@ -1665,21 +1668,22 @@ namespace Unverum
             FeedBox.Visibility = Visibility.Collapsed;
             PageLeft.IsEnabled = false;
             PageRight.IsEnabled = false;
-            var search = searched ? SearchBar.Text : null;
-            await FeedGenerator.GetFeed(page, (GameFilter)GameFilterBox.SelectedIndex, (TypeFilter)TypeBox.SelectedIndex, (FeedFilter)FilterBox.SelectedIndex, (GameBananaCategory)CatBox.SelectedItem,
-                (GameBananaCategory)SubCatBox.SelectedItem, (PerPageBox.SelectedIndex + 1) * 10, (bool)NSFWCheckbox.IsChecked, search, (bool)ZsJsonCheckbox.IsChecked, (bool)ColorZCheckbox.IsChecked);
-            FeedBox.ItemsSource = FeedGenerator.CurrentFeed.Records;
+            var search = searched ? SearchBar.Text ?? string.Empty : string.Empty;
+            await FeedGenerator.GetFeed(page, (GameFilter)GameFilterBox.SelectedIndex, (TypeFilter)TypeBox.SelectedIndex, (FeedFilter)FilterBox.SelectedIndex,
+                CatBox.SelectedItem as GameBananaCategory ?? new(), SubCatBox.SelectedItem as GameBananaCategory ?? new(),
+                (PerPageBox.SelectedIndex + 1) * 10, NSFWCheckbox.IsChecked == true, search, ZsJsonCheckbox.IsChecked == true, ColorZCheckbox.IsChecked == true);
+            FeedBox.ItemsSource = FeedGenerator.CurrentFeed?.Records ?? [];
             if (FeedGenerator.error)
             {
                 LoadingBar.Visibility = Visibility.Collapsed;
                 ErrorPanel.Visibility = Visibility.Visible;
                 BrowserRefreshButton.Visibility = Visibility.Visible;
-                if (FeedGenerator.exception.Message.Contains("JSON tokens"))
+                if (FeedGenerator.exception?.Message.Contains("JSON tokens") == true)
                 {
                     BrowserMessage.Text = "Uh oh! Unverum failed to deserialize the GameBanana feed.";
                     return;
                 }
-                switch (Regex.Match(FeedGenerator.exception.Message, @"\d+").Value)
+                switch (Regex.Match(FeedGenerator.exception?.Message ?? string.Empty, @"\d+").Value)
                 {
                     case "443":
                         BrowserMessage.Text = "Your internet connection is down.";
@@ -1690,12 +1694,14 @@ namespace Unverum
                         BrowserMessage.Text = "GameBanana's servers are down.";
                         break;
                     default:
-                        BrowserMessage.Text = FeedGenerator.exception.Message;
+                        BrowserMessage.Text = FeedGenerator.exception?.Message ?? "The GameBanana request failed.";
                         break;
                 }
                 return;
             }
-            if (page < FeedGenerator.CurrentFeed.TotalPages)
+            if (FeedGenerator.CurrentFeed is not { } currentFeed)
+                return;
+            if (page < currentFeed.TotalPages)
                 PageRight.IsEnabled = true;
             if (page != 1)
                 PageLeft.IsEnabled = true;
@@ -1857,8 +1863,8 @@ namespace Unverum
         }
         private void UniformGrid_SizeChanged(object sender, SizeChangedEventArgs e)
         {
-            var grid = sender as UniformGrid;
-            grid.Columns = (int)grid.ActualWidth / 400 + 1;
+            if (sender is UniformGrid grid)
+                grid.Columns = (int)grid.ActualWidth / 400 + 1;
         }
         private void OnResize(object sender, RoutedEventArgs e)
         {
@@ -2005,23 +2011,16 @@ namespace Unverum
         }
         private void LoadoutsBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (!IsLoaded)
+            if (!IsLoaded || LoadoutsBox.SelectedItem?.ToString() is not { } selectedLoadout)
                 return;
-            // Change the loadout
-            else if (LoadoutsBox.SelectedItem != null)
-            {
-                Global.config.Configs[Global.config.CurrentGame].CurrentLoadout = LoadoutsBox.SelectedItem.ToString();
-
-                // Create loadout if it doesn't exist
-                if (!Global.config.Configs[Global.config.CurrentGame].Loadouts.ContainsKey(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout))
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts.Add(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout, new());
-                else if (Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] == null)
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] = new();
-
-                Global.ModList = Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout];
-                Refresh();
-                Global.logger.WriteLine($"Loadout changed to {LoadoutsBox.SelectedItem}", LoggerType.Info);
-            }
+            var gameConfig = Global.CurrentGameConfig;
+            var loadouts = gameConfig.Loadouts ??= new();
+            gameConfig.CurrentLoadout = selectedLoadout;
+            if (!loadouts.TryGetValue(selectedLoadout, out var mods) || mods == null)
+                loadouts[selectedLoadout] = mods = new();
+            Global.ModList = mods;
+            Refresh();
+            Global.logger.WriteLine($"Loadout changed to {selectedLoadout}", LoggerType.Info);
         }
         private void EditLoadouts_Click(object sender, RoutedEventArgs e)
         {
@@ -2139,128 +2138,88 @@ namespace Unverum
         }
         private void GameBox_DropDownClosed(object sender, EventArgs e)
         {
-            if (handle)
+            if (!handle || GetGameName(GameBox.SelectedValue) is not { } game)
+                return;
+            DiscordButton.Visibility = GameBox.SelectedIndex == 7 ? Visibility.Collapsed : Visibility.Visible;
+            SZFilters.Visibility = GameFilterBox.SelectedIndex == 1 ? Visibility.Visible : Visibility.Collapsed;
+            Global.config.CurrentGame = game;
+            var configs = Global.config.Configs ??= new();
+            if (!configs.TryGetValue(game, out var gameConfig))
+                configs[game] = gameConfig = new GameConfig();
+            var loadouts = gameConfig.Loadouts ??= new();
+            gameConfig.CurrentLoadout = string.IsNullOrEmpty(gameConfig.CurrentLoadout) ? "Default" : gameConfig.CurrentLoadout;
+            if (!loadouts.TryGetValue(gameConfig.CurrentLoadout, out var mods) || mods == null)
             {
-                if (GameBox.SelectedIndex == 7)
-                    DiscordButton.Visibility = Visibility.Collapsed;
-                else
-                    DiscordButton.Visibility = Visibility.Visible;
-                if (GameFilterBox.SelectedIndex == 1)
-                    SZFilters.Visibility = Visibility.Visible;
-                else
-                    SZFilters.Visibility = Visibility.Collapsed;
-                Global.config.CurrentGame = (((GameBox.SelectedValue as ComboBoxItem).Content as StackPanel).Children[1] as TextBlock).Text.Trim().Replace(":", String.Empty);
-
-                if (!Global.config.Configs.ContainsKey(Global.config.CurrentGame))
-                {
-                    Global.ModList = new();
-                    Global.config.Configs.Add(Global.config.CurrentGame, new());
-                    Global.config.Configs[Global.config.CurrentGame].CurrentLoadout = "Default";
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts = new();
-                    Global.config.Configs[Global.config.CurrentGame].Loadouts.Add(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout, new());
-                }
-                else
-                {
-                    if (String.IsNullOrEmpty(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout))
-                        Global.config.Configs[Global.config.CurrentGame].CurrentLoadout = "Default";
-                    if (Global.config.Configs[Global.config.CurrentGame].Loadouts == null)
-                        Global.config.Configs[Global.config.CurrentGame].Loadouts = new();
-                    if (!Global.config.Configs[Global.config.CurrentGame].Loadouts.ContainsKey(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout))
-                        if (Global.config.Configs[Global.config.CurrentGame].ModList != null && Global.config.Configs[Global.config.CurrentGame].CurrentLoadout == "Default")
-                        {
-                            Global.config.Configs[Global.config.CurrentGame].Loadouts.Add(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout, Global.config.Configs[Global.config.CurrentGame].ModList);
-                            Global.config.Configs[Global.config.CurrentGame].ModList = null;
-                        }
-                        else
-                            Global.config.Configs[Global.config.CurrentGame].Loadouts.Add(Global.config.Configs[Global.config.CurrentGame].CurrentLoadout, new());
-                    else if (Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] == null)
-                        if (Global.config.Configs[Global.config.CurrentGame].ModList != null && Global.config.Configs[Global.config.CurrentGame].CurrentLoadout == "Default")
-                        {
-                            Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] = Global.config.Configs[Global.config.CurrentGame].ModList;
-                            Global.config.Configs[Global.config.CurrentGame].ModList = null;
-                        }
-                        else
-                            Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout] = new();
-                    Global.ModList = Global.config.Configs[Global.config.CurrentGame].Loadouts[Global.config.Configs[Global.config.CurrentGame].CurrentLoadout];
-                }
-                Global.LoadoutItems = new ObservableCollection<String>(Global.config.Configs[Global.config.CurrentGame].Loadouts.Keys);
-                LoadoutsBox.ItemsSource = Global.LoadoutItems;
-                LoadoutsBox.SelectedItem = Global.config.Configs[Global.config.CurrentGame].CurrentLoadout;
-                var currentModDirectory = $@"{Global.assemblyLocation}{Global.s}Mods{Global.s}{Global.config.CurrentGame}";
-                Directory.CreateDirectory(currentModDirectory);
-                ModsWatcher.Path = currentModDirectory;
-                Global.logger.WriteLine($"Game switched to {Global.config.CurrentGame}", LoggerType.Info);
-                RefreshAll();
-                Refresh();
-                Global.UpdateConfig();
-                if (String.IsNullOrEmpty(Global.config.Configs[Global.config.CurrentGame].ModsFolder)
-                    || String.IsNullOrEmpty(Global.config.Configs[Global.config.CurrentGame].Launcher) || !File.Exists(Global.config.Configs[Global.config.CurrentGame].Launcher))
-                {
-                    LaunchButton.IsEnabled = false;
-                    Global.logger.WriteLine("Please click Setup before starting!", LoggerType.Warning);
-                }
-                else
-                {
-                    LaunchButton.IsEnabled = true;
-                }
-                if (Global.config.CurrentGame.Equals("Shin Megami Tensei V", StringComparison.InvariantCultureIgnoreCase))
-                {
-                    LauncherOptions[0] = "Emulator";
-                    LauncherOptions[1] = "Hardware";
-                    if (LauncherOptions.Count > 2)
-                        LauncherOptions.RemoveAt(2);
-                }
-                else if (Global.config.CurrentGame.Equals("Kingdom Hearts III", StringComparison.InvariantCultureIgnoreCase))
-                {
-                    LauncherOptions[0] = "Executable";
-                    LauncherOptions[1] = "Epic Games";
-                    if (LauncherOptions.Count > 2)
-                        LauncherOptions.RemoveAt(2);
-                }
-                else if (Global.config.CurrentGame.Equals("The King of Fighters XV", StringComparison.InvariantCultureIgnoreCase))
-                {
-                    LauncherOptions[0] = "Executable";
-                    LauncherOptions[1] = "Steam";
-                    LauncherOptions.Add("Epic Games");
-                }
-                else
-                {
-                    LauncherOptions[0] = "Executable";
-                    LauncherOptions[1] = "Steam";
-                    if (LauncherOptions.Count > 2)
-                        LauncherOptions.RemoveAt(2);
-                }
-
-                OnFirstOpen();
-
-                if (Global.config.CurrentGame.Equals("Dragon Ball FighterZ", StringComparison.InvariantCultureIgnoreCase))
-                    LauncherOptionsBox.IsEnabled = false;
-                else
-                    LauncherOptionsBox.IsEnabled = true;
-                LauncherOptionsBox.ItemsSource = LauncherOptions;
-                LauncherOptionsBox.SelectedIndex = Global.config.Configs[Global.config.CurrentGame].LauncherOptionIndex;
-
-                DescriptionWindow.Document = defaultFlow;
-                var bitmap = new BitmapImage(new Uri("pack://application:,,,/Unverum;component/Assets/unverumpreview.png"));
-                Preview.Source = bitmap;
-                PreviewBG.Source = null;
-
-                Global.logger.WriteLine("Checking for updates...", LoggerType.Info);
-                GameBox.IsEnabled = false;
-                ModGrid.IsEnabled = false;
-                ConfigButton.IsEnabled = false;
-                LaunchButton.IsEnabled = false;
-                OpenModsButton.IsEnabled = false;
-                UpdateButton.IsEnabled = false;
-                EditLoadoutsButton.IsEnabled = false;
-                LoadoutsBox.IsEnabled = false;
-                LauncherOptionsBox.IsEnabled = false;
-                App.Current.Dispatcher.Invoke(() =>
-                {
-                    ModUpdater.CheckForUpdates($"{Global.assemblyLocation}{Global.s}Mods{Global.s}{Global.config.CurrentGame}", this);
-                });
-                handle = false;
+                mods = gameConfig.ModList ?? new ObservableCollection<Mod>();
+                loadouts[gameConfig.CurrentLoadout] = mods;
+                gameConfig.ModList = null;
             }
+            Global.ModList = mods;
+            Global.LoadoutItems = new ObservableCollection<string>(loadouts.Keys);
+            LoadoutsBox.ItemsSource = Global.LoadoutItems;
+            LoadoutsBox.SelectedItem = gameConfig.CurrentLoadout;
+            var currentModDirectory = $@"{Global.assemblyLocation}{Global.s}Mods{Global.s}{game}";
+            Directory.CreateDirectory(currentModDirectory);
+            ModsWatcher.Path = currentModDirectory;
+            Global.logger.WriteLine($"Game switched to {game}", LoggerType.Info);
+            RefreshAll();
+            Refresh();
+            Global.UpdateConfig();
+            LaunchButton.IsEnabled = !string.IsNullOrEmpty(gameConfig.ModsFolder) &&
+                !string.IsNullOrEmpty(gameConfig.Launcher) && File.Exists(gameConfig.Launcher);
+            if (!LaunchButton.IsEnabled)
+                Global.logger.WriteLine("Please click Setup before starting!", LoggerType.Warning);
+
+            if (game.Equals("Shin Megami Tensei V", StringComparison.InvariantCultureIgnoreCase))
+            {
+                LauncherOptions[0] = "Emulator";
+                LauncherOptions[1] = "Hardware";
+                if (LauncherOptions.Count > 2)
+                    LauncherOptions.RemoveAt(2);
+            }
+            else if (game.Equals("Kingdom Hearts III", StringComparison.InvariantCultureIgnoreCase))
+            {
+                LauncherOptions[0] = "Executable";
+                LauncherOptions[1] = "Epic Games";
+                if (LauncherOptions.Count > 2)
+                    LauncherOptions.RemoveAt(2);
+            }
+            else if (game.Equals("The King of Fighters XV", StringComparison.InvariantCultureIgnoreCase))
+            {
+                LauncherOptions[0] = "Executable";
+                LauncherOptions[1] = "Steam";
+                if (LauncherOptions.Count < 3)
+                    LauncherOptions.Add("Epic Games");
+            }
+            else
+            {
+                LauncherOptions[0] = "Executable";
+                LauncherOptions[1] = "Steam";
+                if (LauncherOptions.Count > 2)
+                    LauncherOptions.RemoveAt(2);
+            }
+
+            OnFirstOpen();
+            LauncherOptionsBox.IsEnabled = !game.Equals("Dragon Ball FighterZ", StringComparison.InvariantCultureIgnoreCase);
+            LauncherOptionsBox.ItemsSource = LauncherOptions;
+            LauncherOptionsBox.SelectedIndex = gameConfig.LauncherOptionIndex;
+            DescriptionWindow.Document = defaultFlow;
+            Preview.Source = new BitmapImage(new Uri("pack://application:,,,/Unverum;component/Assets/unverumpreview.png"));
+            PreviewBG.Source = null;
+
+            Global.logger.WriteLine("Checking for updates...", LoggerType.Info);
+            GameBox.IsEnabled = false;
+            ModGrid.IsEnabled = false;
+            ConfigButton.IsEnabled = false;
+            LaunchButton.IsEnabled = false;
+            OpenModsButton.IsEnabled = false;
+            UpdateButton.IsEnabled = false;
+            EditLoadoutsButton.IsEnabled = false;
+            LoadoutsBox.IsEnabled = false;
+            LauncherOptionsBox.IsEnabled = false;
+            App.Current.Dispatcher.Invoke(() =>
+                ModUpdater.CheckForUpdates($"{Global.assemblyLocation}{Global.s}Mods{Global.s}{game}", this));
+            handle = false;
         }
 
         private void Search()
@@ -2336,15 +2295,16 @@ namespace Unverum
         {
             if (!String.IsNullOrEmpty(ModGrid_SearchBar.Text) && ModGridSearchButton.IsEnabled)
             {
-                object focusedItem = null;
+                object? focusedItem = null;
                 ModGrid.SelectedItems.Clear();
-                string text = ModGrid_SearchBar.Text;
+                string text = ModGrid_SearchBar.Text ?? string.Empty;
                 for (int i = 0; i < ModGrid.Items.Count; i++)
                 {
                     object item = ModGrid.Items[i];
                     ModGrid.ScrollIntoView(item);
-                    DataGridRow row = (DataGridRow)ModGrid.ItemContainerGenerator.ContainerFromIndex(i);
-                    TextBlock cellContent = ModGrid.Columns[1].GetCellContent(row) as TextBlock;
+                    if (ModGrid.ItemContainerGenerator.ContainerFromIndex(i) is not DataGridRow row)
+                        continue;
+                    var cellContent = ModGrid.Columns[1].GetCellContent(row) as TextBlock;
                     if (cellContent != null && cellContent.Text.Contains(text, StringComparison.InvariantCultureIgnoreCase))
                     {
                         ModGrid.SelectedItems.Add(item);
@@ -2373,8 +2333,7 @@ namespace Unverum
         }
         private async void SortAlphabeticallyAndGroupEnabled_Click(object sender, RoutedEventArgs e)
         {
-            DataGridColumnHeader colHeader = sender as DataGridColumnHeader;
-            if (colHeader != null)
+            if (sender is DataGridColumnHeader colHeader)
             {
                 if (colHeader.Column.Header.Equals("Name"))
                 {
